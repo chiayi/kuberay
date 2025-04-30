@@ -9,6 +9,19 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+type RayClusterUpgradeType string
+
+const (
+	// Will recreate ray cluster pods based on changes to the RayCluster spec
+	ReCreate RayClusterUpgradeType = "ReCreate"
+	// Allow users to not use any RayClusterUpgrade strategies
+	OnDelete RayClusterUpgradeType = "OnDelete"
+)
+
+type RayClusterUpgradeStrategy struct {
+	Type *RayClusterUpgradeType `json:"type,omitempty"`
+}
+
 // RayClusterSpec defines the desired state of RayCluster
 type RayClusterSpec struct {
 	// Suspend indicates whether a RayCluster should be suspended.
@@ -36,6 +49,9 @@ type RayClusterSpec struct {
 	// GcsFaultToleranceOptions for enabling GCS FT
 	// +optional
 	GcsFaultToleranceOptions *GcsFaultToleranceOptions `json:"gcsFaultToleranceOptions,omitempty"`
+	// UpgradeStrategy defines policy used when upgrading the RayCluster.
+	// +optional
+	UpgradeStrategy *RayClusterUpgradeStrategy `json:"upgradeStrategy,omitempty"`
 	// HeadGroupSpec is the spec for the head pod
 	HeadGroupSpec HeadGroupSpec `json:"headGroupSpec"`
 	// RayVersion is used to determine the command for the Kubernetes Job managed by RayJob
@@ -250,6 +266,7 @@ const (
 	RayClusterPodsProvisioning     = "RayClusterPodsProvisioning"
 	HeadPodNotFound                = "HeadPodNotFound"
 	HeadPodRunningAndReady         = "HeadPodRunningAndReady"
+	RayClusterUpgradeInProgress    = "RayClusterUpgradeInProgress"
 	// UnknownReason says that the reason for the condition is unknown.
 	UnknownReason = "Unknown"
 )
@@ -266,6 +283,8 @@ const (
 	RayClusterSuspending RayClusterConditionType = "RayClusterSuspending"
 	// RayClusterSuspended is set to true when all Pods belonging to a suspending RayCluster are deleted. Note that RayClusterSuspending and RayClusterSuspended cannot both be true at the same time.
 	RayClusterSuspended RayClusterConditionType = "RayClusterSuspended"
+	// RayClusterUpgrading indicates that the cluster is currently going through upgrade process
+	RayClusterUpgrading RayClusterConditionType = "RayClusterUpgrading"
 )
 
 // HeadInfo gives info about head
