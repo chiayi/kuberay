@@ -1,4 +1,4 @@
-// Package s3 is
+// TODO: Migrate S3 to use V2.
 /*
 Copyright 2024 by the kuberay authors.
 
@@ -257,14 +257,22 @@ func (r *RayLogsHandler) GetContent(clusterId string, fileName string) io.Reader
 }
 
 func NewReader(c *types.RayHistoryServerConfig, jd map[string]interface{}) (storage.StorageReader, error) {
-	config := &config{}
+	config := &s3Config{}
 	config.completeHSConfig(c, jd)
 
 	return New(config)
 }
 
+// NewReaderForGCS will fill out the config struct with GCS based configurations that will still work with S3
+func NewReaderForGCS(c *types.RayHistoryServerConfig, jd map[string]interface{}) (storage.StorageReader, error) {
+	config := &s3Config{}
+	config.completeHSConfigForGCS(c, jd)
+
+	return New(config)
+}
+
 func NewWriter(c *types.RayCollectorConfig, jd map[string]interface{}) (storage.StorageWriter, error) {
-	config := &config{}
+	config := &s3Config{}
 	config.complete(c, jd)
 
 	return New(config)
@@ -316,7 +324,8 @@ func createBucketIfNotExists(s3Client *s3.S3, bucketName string) error {
 			if aerr, ok := createErr.(awserr.Error); ok {
 				if aerr.Code() == s3.ErrCodeBucketAlreadyExists ||
 					aerr.Code() == s3.ErrCodeBucketAlreadyOwnedByYou ||
-					aerr.Code() == "BucketAlreadyOwnedByYou" {
+					aerr.Code() == "BucketAlreadyOwnedByYou" ||
+					aerr.Code() == "Confict" { // GCS Specific error code
 					logrus.Infof("Bucket %s already exists", bucketName)
 					return nil
 				}
@@ -332,31 +341,44 @@ func createBucketIfNotExists(s3Client *s3.S3, bucketName string) error {
 	return nil
 }
 
-func New(c *config) (*RayLogsHandler, error) {
+func New(c *s3Config) (*RayLogsHandler, error) {
 	logrus.Infof("Begin to create s3 client ...")
 
 	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 	}
 
-	// Create AWS session
-	sess, err := session.NewSession(&aws.Config{
-		Credentials:      credentials.NewStaticCredentials(c.S3ID, c.S3Secret, c.S3Token),
-		Endpoint:         aws.String(c.S3Endpoint),
-		Region:           aws.String(c.S3Region),
-		HTTPClient:       httpClient,
-		DisableSSL:       c.DisableSSL,
-		S3ForcePathStyle: c.S3ForcePathStyle, // IMPORTANT: Required for MinIO
-	})
-	if err != nil {
-		logrus.Fatalf("Create aws session error %v", err)
+	var sess *session.Session
+	var err error
+	if c.Provider == "gcs" {
+		session.NewSession(&aws.Config{
+			Credentials:      credentials.NewStaticCredentials(c.ID, c.Secret, ""),
+			Endpoint:         aws.String(c.Endpoint),
+			Region:           aws.String(c.Region),
+			HTTPClient:       httpClient,
+			DisableSSL:       c.DisableSSL,
+			S3ForcePathStyle: c.S3ForcePathStyle,
+		})
+	} else {
+		// Create AWS session
+		sess, err = session.NewSession(&aws.Config{
+			Credentials:      credentials.NewStaticCredentials(c.ID, c.Secret, c.Token),
+			Endpoint:         aws.String(c.Endpoint),
+			Region:           aws.String(c.Region),
+			HTTPClient:       httpClient,
+			DisableSSL:       c.DisableSSL,
+			S3ForcePathStyle: c.S3ForcePathStyle, // IMPORTANT: Required for MinIO
+		})
+		if err != nil {
+			logrus.Fatalf("Create aws session error %v", err)
+		}
 	}
 
 	s3Client := s3.New(sess)
 
 	// Ensure bucket exists, create if not
-	logrus.Infof("Checking if bucket %s exists...", c.S3Bucket)
-	if err := createBucketIfNotExists(s3Client, c.S3Bucket); err != nil {
+	logrus.Infof("Checking if bucket %s exists...", c.Bucket)
+	if err := createBucketIfNotExists(s3Client, c.Bucket); err != nil {
 		return nil, fmt.Errorf("failed to ensure bucket exists: %w", err)
 	}
 
@@ -369,7 +391,7 @@ func New(c *config) (*RayLogsHandler, error) {
 
 	return &RayLogsHandler{
 		S3Client:       s3Client,
-		S3Bucket:       c.S3Bucket,
+		S3Bucket:       c.Bucket,
 		SessionDir:     sessionDir,
 		S3RootDir:      c.RootDir,
 		LogDir:         logdir,

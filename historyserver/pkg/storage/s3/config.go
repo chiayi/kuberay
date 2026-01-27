@@ -10,35 +10,46 @@ import (
 
 const DefaultS3Bucket = "ray-historyserver"
 
-type config struct {
+// s3Config sets configuration for s3 and s3 compatible storage options
+type s3Config struct {
 	S3ForcePathStyle *bool
 	DisableSSL       *bool
-	S3Endpoint       string
-	S3Bucket         string
-	S3Region         string
-	S3ID             string
-	S3Secret         string
-	S3Token          string
+	Endpoint         string
+	Bucket           string
+	Region           string
+	ID               string
+	Secret           string
+	Token            string
 	types.RayCollectorConfig
+
+	// Provider is the s3 compatible storage option provider
+	Provider string
 }
 
-func getS3BucketWithDefault() string {
-	bucket := os.Getenv("S3_BUCKET")
+func getBucketWithDefault(provider string) string {
+	var bucket string
+	if provider == "gcs" {
+		bucket = os.Getenv("GCS_BUCKET")
+	} else {
+		bucket = os.Getenv("S3_BUCKET")
+	}
+
 	if bucket == "" {
 		return DefaultS3Bucket
 	}
 	return bucket
 }
 
-func (c *config) complete(rcc *types.RayCollectorConfig, jd map[string]interface{}) {
+func (c *s3Config) complete(rcc *types.RayCollectorConfig, jd map[string]interface{}) {
+	c.Provider = "aws"
 	c.RayCollectorConfig = *rcc
-	c.S3ID = os.Getenv("AWS_S3ID")
-	c.S3Secret = os.Getenv("AWS_S3SECRET")
-	c.S3Token = os.Getenv("AWS_S3TOKEN")
-	c.S3Bucket = getS3BucketWithDefault()
+	c.ID = os.Getenv("AWS_S3ID")
+	c.Secret = os.Getenv("AWS_S3SECRET")
+	c.Token = os.Getenv("AWS_S3TOKEN")
+	c.Bucket = getBucketWithDefault(c.Provider)
 	if len(jd) == 0 {
-		c.S3Endpoint = os.Getenv("S3_ENDPOINT")
-		c.S3Region = os.Getenv("S3_REGION")
+		c.Endpoint = os.Getenv("S3_ENDPOINT")
+		c.Region = os.Getenv("S3_REGION")
 		if os.Getenv("S3FORCE_PATH_STYLE") != "" {
 			c.S3ForcePathStyle = aws.Bool(os.Getenv("S3FORCE_PATH_STYLE") == "true")
 		}
@@ -47,13 +58,13 @@ func (c *config) complete(rcc *types.RayCollectorConfig, jd map[string]interface
 		}
 	} else {
 		if bucket, ok := jd["s3Bucket"]; ok {
-			c.S3Bucket = bucket.(string)
+			c.Bucket = bucket.(string)
 		}
 		if endpoint, ok := jd["s3Endpoint"]; ok {
-			c.S3Endpoint = endpoint.(string)
+			c.Endpoint = endpoint.(string)
 		}
 		if region, ok := jd["s3Region"]; ok {
-			c.S3Region = region.(string)
+			c.Region = region.(string)
 		}
 		if forcePathStyle, ok := jd["s3ForcePathStyle"]; ok {
 			c.S3ForcePathStyle = aws.Bool(forcePathStyle.(string) == "true")
@@ -64,17 +75,18 @@ func (c *config) complete(rcc *types.RayCollectorConfig, jd map[string]interface
 	}
 }
 
-func (c *config) completeHSConfig(rcc *types.RayHistoryServerConfig, jd map[string]interface{}) {
+func (c *s3Config) completeHSConfig(rcc *types.RayHistoryServerConfig, jd map[string]interface{}) {
+	c.Provider = "aws"
 	c.RayCollectorConfig = types.RayCollectorConfig{
 		RootDir: rcc.RootDir,
 	}
-	c.S3ID = os.Getenv("AWS_S3ID")
-	c.S3Secret = os.Getenv("AWS_S3SECRET")
-	c.S3Token = os.Getenv("AWS_S3TOKEN")
-	c.S3Bucket = getS3BucketWithDefault() // Use default if S3_BUCKET not set
+	c.ID = os.Getenv("AWS_S3ID")
+	c.Secret = os.Getenv("AWS_S3SECRET")
+	c.Token = os.Getenv("AWS_S3TOKEN")
+	c.Bucket = getBucketWithDefault(c.Provider) // Use default if S3_BUCKET not set
 	if len(jd) == 0 {
-		c.S3Endpoint = os.Getenv("S3_ENDPOINT")
-		c.S3Region = os.Getenv("S3_REGION")
+		c.Endpoint = os.Getenv("S3_ENDPOINT")
+		c.Region = os.Getenv("S3_REGION")
 		if os.Getenv("S3FORCE_PATH_STYLE") != "" {
 			c.S3ForcePathStyle = aws.Bool(os.Getenv("S3FORCE_PATH_STYLE") == "true")
 		}
@@ -83,13 +95,13 @@ func (c *config) completeHSConfig(rcc *types.RayHistoryServerConfig, jd map[stri
 		}
 	} else {
 		if bucket, ok := jd["s3Bucket"]; ok {
-			c.S3Bucket = bucket.(string)
+			c.Bucket = bucket.(string)
 		}
 		if endpoint, ok := jd["s3Endpoint"]; ok {
-			c.S3Endpoint = endpoint.(string)
+			c.Endpoint = endpoint.(string)
 		}
 		if region, ok := jd["s3Region"]; ok {
-			c.S3Region = region.(string)
+			c.Region = region.(string)
 		}
 		if forcePathStyle, ok := jd["s3ForcePathStyle"]; ok {
 			c.S3ForcePathStyle = aws.Bool(forcePathStyle.(string) == "true")
@@ -98,4 +110,63 @@ func (c *config) completeHSConfig(rcc *types.RayHistoryServerConfig, jd map[stri
 			c.DisableSSL = aws.Bool(s3disableSSL.(string) == "true")
 		}
 	}
+}
+
+func (c *s3Config) completeHSConfigForGCS(rcc *types.RayHistoryServerConfig, jd map[string]interface{}) {
+	c.Provider = "gcs"
+	c.RayCollectorConfig = types.RayCollectorConfig{
+		RootDir: rcc.RootDir,
+	}
+	c.ID = os.Getenv("GCS_ACCESSKEY")
+	c.Secret = os.Getenv("GCS_SECRETKEY")
+
+	c.Bucket = getBucketWithDefault(c.Provider)
+	if len(jd) == 0 {
+		c.Endpoint = os.Getenv("GCS_ENDPOINT")
+		if os.Getenv("GCS_DISABLE_SSL") != "" {
+			c.DisableSSL = aws.Bool(os.Getenv("GCS_DISABLE_SSL") == "true")
+		}
+	} else {
+		if bucket, ok := jd["gcsBucket"]; ok {
+			c.Bucket = bucket.(string)
+		}
+		if endpoint, ok := jd["gcsEndpoint"]; ok {
+			c.Endpoint = endpoint.(string)
+		}
+		if gcsDisableSSL, ok := jd["gcsDisableSSL"]; ok {
+			c.DisableSSL = aws.Bool(gcsDisableSSL.(string) == "true")
+		}
+	}
+
+	// Set the remaining required GCS fields, token is not needed for GCS
+	c.Region = "auto"                   // Any string will work, GCS is global but S3 requires Region to be filled
+	c.S3ForcePathStyle = aws.Bool(true) // Has to be true for GCS compatibility
+}
+
+func (c *s3Config) completeCollectorConfigForGCS(rcc *types.RayCollectorConfig, jd map[string]interface{}) {
+	c.Provider = "gcs"
+	c.RayCollectorConfig = *rcc
+	c.ID = os.Getenv("GCS_ACCESSKEY")
+	c.Secret = os.Getenv("GCS_SECRETKEY")
+
+	c.Bucket = getBucketWithDefault(c.Provider)
+	if len(jd) == 0 {
+		c.Endpoint = os.Getenv("GCS_ENDPOINT")
+		if os.Getenv("GCS_DISABLE_SSL") != "" {
+			c.DisableSSL = aws.Bool(os.Getenv("GCS_DISABLE_SSL") == "true")
+		}
+	} else {
+		if bucket, ok := jd["gcsBucket"]; ok {
+			c.Bucket = bucket.(string)
+		}
+		if endpoint, ok := jd["gcsEndpoint"]; ok {
+			c.Endpoint = endpoint.(string)
+		}
+		if gcsDisableSSL, ok := jd["gcsDisableSSL"]; ok {
+			c.DisableSSL = aws.Bool(gcsDisableSSL.(string) == "true")
+		}
+	}
+
+	c.Region = "auto"                   // Any string will work, GCS is global but S3 requires Region to be filled
+	c.S3ForcePathStyle = aws.Bool(true) // Has to be true for GCS compatibility
 }
