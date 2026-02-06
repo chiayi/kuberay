@@ -22,6 +22,7 @@ import (
 const (
 	LiveSessionName = "live"
 	EndpointLogFile = "/api/v0/logs/file"
+	EndpointJobs    = "/api/jobs/"
 )
 
 func TestHistoryServer(t *testing.T) {
@@ -47,6 +48,10 @@ func TestHistoryServer(t *testing.T) {
 		{
 			name:     "/v0/logs/file endpoint (dead cluster)",
 			testFunc: testLogFileEndpointDeadCluster,
+		},
+		{
+			name:     "/api/jobs/ endpoint",
+			testFunc: testJobEndpointDeadCluster,
 		},
 	}
 
@@ -325,4 +330,44 @@ func testLogFileEndpointDeadCluster(test Test, g *WithT, namespace *corev1.Names
 
 	DeleteS3Bucket(test, g, s3Client)
 	LogWithTimestamp(test.T(), "Dead cluster log file endpoint tests completed")
+}
+
+// testJobEndpointDeadCluster tests that the history server can retrieve the job information after cluster is deleted
+func testJobEndpointDeadCluster(test Test, g *WithT, namespace *corev1.Namespace, s3Client *s3.S3) {
+	// Setup history server with ray job
+	rayCluster := PrepareTestEnv(test, g, namespace, s3Client)
+	ApplyRayJobAndWaitForCompletion(test, g, namespace, rayCluster)
+
+	// Delete RayCluster to trigger log upload
+	err := test.Client().Ray().RayV1().RayClusters(namespace.Name).Delete(test.Ctx(), rayCluster.Name, metav1.DeleteOptions{})
+	g.Expect(err).NotTo(HaveOccurred())
+	LogWithTimestamp(test.T(), "Deleted RayCluster %s/%s", namespace.Name, rayCluster.Name)
+
+	// Wait for cluster to be fully deleted (ensures logs are uploaded to S3)
+	g.Eventually(func() error {
+		_, err := GetRayCluster(test, namespace.Name, rayCluster.Name)
+		return err
+	}, TestTimeoutMedium).Should(WithTransform(k8serrors.IsNotFound, BeTrue()))
+
+	ApplyHistoryServer(test, g, namespace)
+	historyServerURL := GetHistoryServerURL(test, g, namespace)
+
+	clusterInfo := getClusterFromList(test, g, historyServerURL, rayCluster.Name, namespace.Name)
+	g.Expect(clusterInfo.SessionName).NotTo(Equal(LiveSessionName))
+
+	client := CreateHTTPClientWithCookieJar(g)
+	setClusterContext(test, g, client, historyServerURL, namespace.Name, rayCluster.Name, clusterInfo.SessionName)
+
+	// call the job endpoint
+	test.T().Run("should return ray job list", func(t *testing.T) {
+		// TOOD(chiayi): fill
+	})
+
+	test.T().Run("should return singular ray job list", func(t *testing.T) {
+		// TOOD(chiayi): fill
+	})
+
+	test.T().Run("should return singular ray job log", func(t *testing.T) {
+		// TOOD(chiayi): Add test once the /jobs/{jobID}/logs/ endpoint is ready
+	})
 }
