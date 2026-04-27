@@ -2,6 +2,7 @@ package eventcollector
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -437,7 +438,16 @@ func (ec *EventCollector) flushNodeEventsForHour(hourKey string, events []Event)
 		return fmt.Errorf("failed to marshal node events: %w", err)
 	}
 
-	reader := bytes.NewReader(data)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(data); err != nil {
+		return fmt.Errorf("gzip write: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("gzip close: %w", err)
+	}
+	compressedData := buf.Bytes()
+	reader := bytes.NewReader(compressedData)
 
 	// Use sessionName from event, not config
 	sessionNameToUse := ec.sessionName // Default to configured sessionName
@@ -457,7 +467,7 @@ func (ec *EventCollector) flushNodeEventsForHour(hourKey string, events []Event)
 		fmt.Sprintf("%s_%s", ec.clusterName, ec.clusterNamespace),
 		sessionNameToUse,
 		"node_events",
-		fmt.Sprintf("%s-%s", nodeIDToUse, hourKey))
+		fmt.Sprintf("%s-%s.gz", nodeIDToUse, hourKey))
 
 	// Ensure storage directory exists
 	dir := path.Dir(basePath)
@@ -487,7 +497,16 @@ func (ec *EventCollector) flushJobEventsForHour(jobID, hourKey string, events []
 		return fmt.Errorf("failed to marshal job events: %w", err)
 	}
 
-	reader := bytes.NewReader(data)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(data); err != nil {
+		return fmt.Errorf("gzip write: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("gzip close: %w", err)
+	}
+	compressedData := buf.Bytes()
+	reader := bytes.NewReader(compressedData)
 
 	// Use sessionName from event, not config
 	sessionNameToUse := ec.sessionName // Default to configured sessionName
@@ -508,7 +527,7 @@ func (ec *EventCollector) flushJobEventsForHour(jobID, hourKey string, events []
 		sessionNameToUse,
 		"job_events",
 		jobID,
-		fmt.Sprintf("%s-%s", nodeIDToUse, hourKey))
+		fmt.Sprintf("%s-%s.gz", nodeIDToUse, hourKey))
 
 	// Ensure storage directory exists
 	dir := path.Dir(basePath)

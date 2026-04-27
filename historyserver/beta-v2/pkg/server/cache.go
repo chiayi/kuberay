@@ -8,6 +8,7 @@
 package server
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,10 +113,18 @@ func (l *SnapshotLoader) fetch(clusterNameID, sessionName string) (*snapshot.Ses
 	if reader == nil {
 		return nil, ErrSnapshotNotFound
 	}
-	body, err := io.ReadAll(reader)
+
+	gzReader, err := gzip.NewReader(reader)
 	if err != nil {
-		return nil, fmt.Errorf("read snapshot body: %w", err)
+		return nil, fmt.Errorf("gzip reader init: %w", err)
 	}
+	defer gzReader.Close()
+
+	body, err := io.ReadAll(gzReader)
+	if err != nil {
+		return nil, fmt.Errorf("read decompressed snapshot: %w", err)
+	}
+
 	var snap snapshot.SessionSnapshot
 	if err := json.Unmarshal(body, &snap); err != nil {
 		return nil, fmt.Errorf("decode snapshot: %w", err)

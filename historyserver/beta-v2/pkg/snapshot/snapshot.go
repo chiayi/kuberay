@@ -39,7 +39,7 @@ type LogEventPayload struct {
 // Storage path convention constants for the processed snapshot file.
 const (
 	ProcessedDir = "processed"
-	SnapshotFile = "session.json"
+	SnapshotFile = "session.json.gz"
 )
 
 // SnapshotPath returns the path (relative to the cluster root "{name}_{ns}/")

@@ -21,6 +21,7 @@ package processor
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -265,15 +266,26 @@ func (p *Pipeline) writeSnapshot(clusterNameID, sessionName string, snap *snapsh
 	if err != nil {
 		return fmt.Errorf("marshal snapshot for %s/%s: %w", clusterNameID, sessionName, err)
 	}
+
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(body); err != nil {
+		return fmt.Errorf("gzip write: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("gzip close: %w", err)
+	}
+	compressedBody := buf.Bytes()
+
 	// v1 StorageWriter.WriteFile takes the full absolute key (no auto-prepend),
 	// while StorageReader.GetContent internally prepends rootDir + clusterId.
 	// Mirror GetContent's layout here so a subsequent Load finds the object:
 	//   key = {rootDir}/{clusterNameID}/{snapshot.SnapshotPath(sessionName)}
 	dst := path.Join(p.rootDir, clusterNameID, snapshot.SnapshotPath(sessionName))
-	if err := p.writer.WriteFile(dst, bytes.NewReader(body)); err != nil {
+	if err := p.writer.WriteFile(dst, bytes.NewReader(compressedBody)); err != nil {
 		return fmt.Errorf("write snapshot %s: %w", dst, err)
 	}
-	logrus.Infof("wrote snapshot for %s/%s (%d bytes)", clusterNameID, sessionName, len(body))
+	logrus.Infof("wrote snapshot for %s/%s (%d bytes, compressed from %d)", clusterNameID, sessionName, len(compressedBody), len(body))
 	return nil
 }
 

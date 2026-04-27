@@ -1,6 +1,7 @@
 package eventserver
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -28,7 +29,7 @@ type EventHandler struct {
 	ClusterLogEventMap *types.ClusterLogEventMap // For /events API (Log Events from logs/events/)
 }
 
-var eventFilePattern = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}-\d{2}$`)
+var eventFilePattern = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}-\d{2}(\.gz)?$`)
 
 // taskPrefix is extracted to avoid hard-coded "task::" usage
 const taskPrefix = "task::"
@@ -1574,10 +1575,27 @@ func (h *EventHandler) ProcessSingleSession(clusterInfo utils.ClusterInfo) error
 			logrus.Errorf("Failed to get content for event file: %s, skipping", eventFile)
 			continue
 		}
-		eventbytes, err := io.ReadAll(eventioReader)
+		var r io.Reader = eventioReader
+		var gzReader *gzip.Reader
+		if strings.HasSuffix(eventFile, ".gz") {
+			var err error
+			gzReader, err = gzip.NewReader(eventioReader)
+			if err != nil {
+				logrus.Errorf("Failed to create gzip reader for %s: %v", eventFile, err)
+				continue
+			}
+			r = gzReader
+		}
+		eventbytes, err := io.ReadAll(r)
 		if err != nil {
 			logrus.Errorf("Failed to read event file: %v", err)
+			if gzReader != nil {
+				gzReader.Close()
+			}
 			continue
+		}
+		if gzReader != nil {
+			gzReader.Close()
 		}
 
 		var eventList []map[string]any
