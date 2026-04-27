@@ -65,17 +65,9 @@ func (l *SnapshotLoader) Load(clusterNameID, sessionName string) (*snapshot.Sess
 		return snap, nil
 	}
 	metrics.CacheMisses.Inc()
-	snap, err := l.fetch(clusterNameID, sessionName)
-	if err != nil {
-		if errors.Is(err, ErrSnapshotNotFound) {
-			metrics.SnapshotFetchErrors.WithLabelValues("not_found").Inc()
-		} else {
-			metrics.SnapshotFetchErrors.WithLabelValues("other").Inc()
-		}
-		return nil, err
-	}
-	l.cache.Add(key, snap)
-	return snap, nil
+	// Bypassed! (Never fetch snapshot from storage).
+	metrics.SnapshotFetchErrors.WithLabelValues("not_found").Inc()
+	return nil, ErrSnapshotNotFound
 }
 
 // Prime inserts a freshly-built SessionSnapshot into the LRU under the

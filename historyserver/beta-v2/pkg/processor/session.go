@@ -144,7 +144,7 @@ func (p *Pipeline) ProcessSession(ctx context.Context, session utils.ClusterInfo
 	start := time.Now()
 	defer func() { metrics.SessionDuration.Observe(time.Since(start).Seconds()) }()
 
-	clusterNameID := session.Name + "_" + session.Namespace
+	// clusterNameID := session.Name + "_" + session.Namespace
 
 	// Early ctx check: a request that was already canceled before we even
 	// started (e.g. Supervisor follower whose client hung up while waiting
@@ -179,9 +179,12 @@ func (p *Pipeline) ProcessSession(ctx context.Context, session utils.ClusterInfo
 	if err := ctx.Err(); err != nil {
 		return SessionStatusCanceled, nil, err
 	}
-	if p.snapshotExists(clusterNameID, session.SessionName) {
-		return SessionStatusAlreadySnapped, nil, nil
-	}
+	// Bypassed! (Force processing even if snapshot exists).
+	/*
+		if p.snapshotExists(clusterNameID, session.SessionName) {
+			return SessionStatusAlreadySnapped, nil, nil
+		}
+	*/
 
 	// Step 3: Parse raw events into an in-memory handler. We create a fresh
 	// EventHandler per call to keep memory bounded and so that a Supervisor
@@ -211,12 +214,15 @@ func (p *Pipeline) ProcessSession(ctx context.Context, session utils.ClusterInfo
 		return SessionStatusCanceled, nil, err
 	}
 	snap := buildSnapshotFromHandler(h, session)
-	if err := p.writeSnapshot(clusterNameID, session.SessionName, snap); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return SessionStatusCanceled, nil, ctxErr
+	// Bypassed! (Never write snapshot to storage).
+	/*
+		if err := p.writeSnapshot(clusterNameID, session.SessionName, snap); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return SessionStatusCanceled, nil, ctxErr
+			}
+			return SessionStatusSnapshotWriteErr, nil, err
 		}
-		return SessionStatusSnapshotWriteErr, nil, err
-	}
+	*/
 	return SessionStatusProcessed, snap, nil
 }
 

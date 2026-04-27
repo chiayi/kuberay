@@ -17,7 +17,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"golang.org/x/sync/singleflight"
@@ -144,27 +143,14 @@ func (s *Supervisor) Ensure(ctx context.Context, info utils.ClusterInfo) error {
 // This is split out from Ensure mainly for readability: the Do closure would
 // otherwise be ~40 lines of nested logic inside a select block.
 func (s *Supervisor) runOnce(ctx context.Context, info utils.ClusterInfo, clusterNameID string) (interface{}, error) {
-	// Layer 1 + 2: LRU then S3 GET (both hidden inside loader.Load).
-	snap, err := s.loader.Load(clusterNameID, info.SessionName)
-	if err == nil {
-		// Snapshot already persisted (either this process cached it, or a
-		// sibling replica PUT it earlier). Ensure the loader cache holds
-		// it for subsequent same-process calls.
-		//
-		// NOTE: Load already inserts into the LRU on miss+success, so this
-		// is already correct — we deliberately do NOT re-Prime here to
-		// keep the fast path metric-free (a CacheHit is just as cheap as
-		// a Prime+Load pair).
+	// Layer 1: LRU Cache hit (bypass Layer 2 storage check).
+	key := clusterNameID + "/" + info.SessionName
+	if snap, ok := s.loader.cache.Get(key); ok {
+		metrics.CacheHits.Inc()
 		_ = snap
 		return nil, nil
 	}
-	// Conservative policy for non-NotFound errors: bubble up to the client
-	// as a 500 rather than triggering a costly Pipeline execution. A
-	// transient S3 outage will clear within seconds; the client can retry.
-	// See beta_poc.md Q1 for the why.
-	if !errors.Is(err, ErrSnapshotNotFound) {
-		return nil, fmt.Errorf("loader.Load %s/%s: %w", clusterNameID, info.SessionName, err)
-	}
+	metrics.CacheMisses.Inc()
 
 	// Layer 3: synchronously build + PUT. Passes the winner's request ctx
 	// so that if the winner's client disconnects we stop wasting work. This
